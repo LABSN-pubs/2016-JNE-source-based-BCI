@@ -6,8 +6,10 @@ switchPredFun.py
 Script with helper functions for ML prediction of SOP data.
 """
 
+from os import environ, path as op
 import numpy as np
 from sklearn.svm import SVC
+import mne
 
 cache_size = 4096
 
@@ -206,6 +208,40 @@ def cross_val_ica(data_dict, kernel_list, C_range, g_range):
     return score_array
 
 
+def bin_sens(array, bin_width):
+    """Helper function to compute simple windowed average of data
+
+    Parameters
+    ----------
+    array : ndarray, shape(n_trials, n_sensors, n_times)
+    bin_width : width of average window in seconds
+
+    Returns
+    -------
+    binned_data
+
+    """
+    start, stop = 0, array.shape[2]
+    times = np.arange(start, stop + 1, bin_width * 1000)
+
+    n_trials, n_sens, orig_max_time = array.shape
+    n_times = len(times) - 1
+    data = np.empty((n_trials, n_sens, n_times), dtype=array.dtype)
+
+    orig_times = np.arange(orig_max_time)
+
+    for t in range(n_trials):
+        for i in range(n_times):
+            # Make mask of times needed
+            idx = (orig_times >= times[i]) & (orig_times < times[i + 1])
+            min_ind, max_ind = np.min(np.where(idx)), np.max(np.where(idx))
+
+            # Subselect portion of array in time window
+            data[t, :, i] = np.mean(array[t, :, min_ind:max_ind], axis=1)
+
+    return data
+
+
 def apply_unmixing(data_3d, unmix_mat):
     """Helper function to apply unmixing matrix to 3D data
 
@@ -241,13 +277,21 @@ def process_mean(scores):
     return scores_proc
 
 
-def process_pca(scores):
-    """Helper function to process PCA scores"""
+def process_pca(scores, switch_period_dim=1):
+    """Helper function to process PCA scores
+    Parameters
+    ----------
+    scores: array-like
 
+    switch_period_dim: int
+        Dimension of switching period to select in scores.
+    """
+
+    # Shape = (# comp., switch_period_ind, x subj x CV x kernel x C x gamma)
     assert len(scores.shape) == 7, 'Incorrect number of dims'
 
     # Get scores meaned over CVs, max svm params, and time period of interest
-    scores_temp = _process_aux(scores, 3, (-3, -2, -1), 1)
+    scores_temp = _process_aux(scores, 3, (-3, -2, -1), switch_period_dim)
 
     scores_proc = np.copy(scores_temp)  # Copy initial processed score array
     scores_temp = scores_temp.mean(1)  # Mean across subjects
@@ -259,13 +303,21 @@ def process_pca(scores):
     return scores_proc
 
 
-def process_csp(scores):
-    """Helper function to process CSP scores"""
+def process_csp(scores, switch_period_dim=1):
+    """Helper function to process CSP scores
+    Parameters
+    ----------
+    scores: array-like
 
+    switch_period_dim: int
+        Dimension of switching period to select in scores.
+    """
+
+    # Shape = (csp reg, # comp., switch_period_ind, x subj x CV x kernel x C x gamma)
     assert len(scores.shape) == 8, 'Incorrect number of dims'
 
     # Get scores meaned over CVs, max svm params, and time period of interest
-    scores_temp = _process_aux(scores, 4, (-3, -2, -1), 1)
+    scores_temp = _process_aux(scores, 4, (-3, -2, -1), switch_period_dim)
 
     scores_proc = np.copy(scores_temp)  # Copy initial processed score array
     scores_temp = scores_temp.mean(2)  # Mean across subjects
@@ -281,13 +333,22 @@ def process_csp(scores):
     return scores_proc
 
 
-def process_ica(scores):
-    """Helper function to process ICA scores"""
+def process_ica(scores, switch_period_dim=1):
+    """Helper function to process ICA scores.
 
+    Parameters
+    ----------
+    scores: array-like
+
+    switch_period_dim: int
+        Dimension of switching period to select in scores.
+    """
+
+    # Shape = (# comp., switch_period_ind, x subj x CV x kernel x C x gamma)
     assert len(scores.shape) == 7, 'Incorrect number of dims'
 
     # Get scores meaned over CVs, max svm params, and time period of interest
-    scores_temp = _process_aux(scores, 3, (-3, -2, -1), 1)
+    scores_temp = _process_aux(scores, 3, (-3, -2, -1), switch_period_dim)
 
     scores_proc = np.copy(scores_temp)  # Copy initial processed score array
     scores_temp = scores_temp.mean(1)  # Mean across subjects
@@ -309,3 +370,28 @@ def _process_aux(scores, mean_dim_1, max_dims, switch_period_dim):
     scores_temp = scores_temp[switch_period_dim, :, :]  # Pick switching period
 
     return scores_temp
+
+
+def load_fsaverage_dict():
+    """Helper to load relevant fsavarge information"""
+    struct_dir = op.join(environ['SUBJECTS_DIR'])
+    fsaverage = {}
+
+    fsaverage['src'] = mne.read_source_spaces(op.join(struct_dir, 'fsaverage',
+                                                      'bem',
+                                                      'fsaverage-5p7-src.fif'),
+                                              verbose=False)
+    fsaverage['vertices'] = [fsaverage['src'][0]['vertno'],
+                             fsaverage['src'][1]['vertno']]
+
+    return fsaverage
+
+
+def get_noise_scale_factor(x, snr, cov):
+    """Helper to calculate the noise scalar to get the desired SNR"""
+
+    sig_var = np.mean(x ** 2)
+    noise_var = np.mean(np.diagonal(cov['data']))
+    snr_factor = 10. ** (snr / 10.)
+
+    return sig_var / (noise_var * snr_factor)
