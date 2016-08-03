@@ -5,9 +5,7 @@ switchPredSensLoop_all.py
 
 Predict attentional switching from activity in sensor space
 using EEG data. Iterate over a number of possible parameters
-to optimize. Runs with PCA/ICA/CSP or mean activity
-
-Data used to plot Figure 5
+to optimize. Runs with PCA/ICA/CSP
 """
 
 from os import environ, path as op
@@ -20,44 +18,13 @@ import numpy as np
 import mne
 from mne.io import RawArray
 from config import DATA_PARAMS, CLSF_PARAMS, CSP_PARAMS, ICA_PARAMS, PCA_PARAMS
+from switchPredFun import bin_sens
 
 # Choices for decomposition method used in analysis
-decomp = 'CSP'  # Choose 'PCA', 'ICA', or 'CSP'
-save_data = True
+decomp = 'ICA'  # Choose 'PCA', 'ICA', or 'CSP'
+save_data = False
 
 debug = False  # Run with simpler parameters to speed up testing
-
-
-def bin(array, bin_width):
-    """Helper function to compute simple windowed average of data
-    Parameters
-    ----------
-    array : ndarray, shape(n_trials, n_sensors, n_times)
-    bin_width : width of average window in seconds
-
-    Returns
-    -------
-
-    """
-    start, stop = 0, array.shape[2]
-    times = np.arange(start, stop + 1, bin_width * 1000)
-
-    n_trials, n_sens, orig_max_time = array.shape
-    n_times = len(times) - 1
-    data = np.empty((n_trials, n_sens, n_times), dtype=array.dtype)
-
-    orig_times = np.arange(orig_max_time)
-
-    for t in range(n_trials):
-        for i in range(n_times):
-            # Make mask of times needed
-            idx = (orig_times >= times[i]) & (orig_times < times[i + 1])
-            min_ind, max_ind = np.min(np.where(idx)), np.max(np.where(idx))
-
-            # Subselect portion of array in time window
-            data[t, :, i] = np.mean(array[t, :, min_ind:max_ind], axis=1)
-
-    return data
 
 
 def roll_raw(data, info):
@@ -135,7 +102,7 @@ for si, di in enumerate(subj_inds):
             subj_trial_nums.append(orig_mat.shape[0])
 
         if bin_width != 0.001:
-            subj_d[di]['epo_mat'][p] = bin(orig_mat, bin_width)
+            subj_d[di]['epo_mat'][p] = bin_sens(orig_mat, bin_width)
         else:
             subj_d[di]['epo_mat'][p] = orig_mat
 
@@ -242,9 +209,9 @@ def ica_routine(params, subj_inds, subj_d):
     for t_wind_i, t_wind in enumerate(params['t_wind_binned']):
         print '\t' + 'Time window: ' + str(t_wind),
 
-        for comp_i, n_components in enumerate(params['n_components_list']):
+        for comp_i, var_explained in enumerate(params['n_components_list']):
 
-            ica = ICA(n_components=n_components,
+            ica = ICA(n_components=var_explained,
                       method=ICA_PARAMS['ica_init_params']['method'],
                       max_iter=ICA_PARAMS['ica_init_params']['max_iter'])
             for si, di in enumerate(subj_inds):
