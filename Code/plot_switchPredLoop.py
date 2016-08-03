@@ -4,7 +4,7 @@ plot_switchPredLoop.py
 @Author: wronk
 
 Plot results from attentional switching ML prediction (3 groups) + mean
-Used for source (including AND excluding MRI) and sensor space in Figure 5
+Used for source (including AND excluding MRI) and sensor space manuscript fig
 """
 
 from os import environ, path as op
